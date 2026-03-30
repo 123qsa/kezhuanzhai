@@ -1,0 +1,72 @@
+version: '3.8'
+
+services:
+  n8n:
+    image: n8nio/n8n:latest
+    restart: always
+    ports:
+      - "5678:5678"
+    environment:
+      - N8N_BASIC_AUTH_ACTIVE=true
+      - N8N_BASIC_AUTH_USER=admin
+      - N8N_BASIC_AUTH_PASSWORD=admin123
+      - N8N_HOST=localhost
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=http
+      - NODE_ENV=production
+      - WEBHOOK_URL=http://localhost:5678/
+      - GENERIC_TIMEZONE=Asia/Shanghai
+      - EXECUTIONS_TIMEOUT=600
+      - EXECUTIONS_TIMEOUT_MAX=3600
+    volumes:
+      - ~/.n8n:/home/node/.n8n
+      - ./n8n_scripts:/home/node/.n8n/scripts
+    depends_on:
+      - postgres
+    networks:
+      - n8n-network
+
+  # Python 执行服务 - 用于运行 AkShare 脚本
+  python-runner:
+    build:
+      context: .
+      dockerfile: Dockerfile.python
+    restart: always
+    volumes:
+      - ./n8n_scripts:/app/scripts
+    ports:
+      - "5000:5000"
+    networks:
+      - n8n-network
+
+  postgres:
+    image: postgres:15-alpine
+    restart: always
+    environment:
+      - POSTGRES_USER=n8n
+      - POSTGRES_PASSWORD=n8n123
+      - POSTGRES_DB=n8n
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - n8n-network
+
+  # 前端 API 服务
+  frontend-api:
+    build:
+      context: ./frontend-api
+      dockerfile: Dockerfile
+    restart: always
+    ports:
+      - "3000:3000"
+    environment:
+      - PORT=3000
+    networks:
+      - n8n-network
+
+volumes:
+  postgres_data:
+
+networks:
+  n8n-network:
+    driver: bridge

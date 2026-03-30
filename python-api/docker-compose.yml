@@ -1,0 +1,15 @@
+services:
+  python-api:
+    build: .
+    container_name: kezhuanzhai-python-api
+    restart: always
+    ports:
+      - "0.0.0.0:5001:5001"
+    environment:
+      - FLASK_ENV=production
+    networks:
+      - kezhuanzhai-network
+
+networks:
+  kezhuanzhai-network:
+    driver: bridge

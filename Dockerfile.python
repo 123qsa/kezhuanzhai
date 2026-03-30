@@ -1,0 +1,29 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# 安装系统依赖
+RUN apt-get update && apt-get install -y \
+    gcc \
+    g++ \
+    && rm -rf /var/lib/apt/lists/*
+
+# 安装 Python 依赖
+RUN pip install --no-cache-dir \
+    akshare \
+    flask \
+    pandas \
+    requests
+
+# 创建脚本目录
+RUN mkdir -p /app/scripts
+
+# 复制 Python 脚本
+COPY n8n_scripts/*.py /app/scripts/
+
+# 创建 Flask API 服务
+COPY python_api.py /app/
+
+EXPOSE 5000
+
+CMD ["python", "python_api.py"]

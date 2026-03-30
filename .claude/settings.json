@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__notion__notion-search",
+      "WebFetch(domain:github.com)",
+      "Bash(plugin install:*)",
+      "Bash(:)",
+      "Bash(diskutil list:*)",
+      "mcp__MiniMax__web_search"
+    ]
+  }
+}
