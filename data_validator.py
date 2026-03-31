@@ -4,7 +4,6 @@
 可转债数据采集验证程序
 
 每天数据采集后运行此程序，验证数据完整性和一致性。
-可通过命令行运行或集成到 n8n 工作流中。
 
 使用方法:
     python data_validator.py [--json] [--save-report]

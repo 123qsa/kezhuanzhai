@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Python API 服务 - 为 n8n 提供 AkShare 数据接口
+Python API 服务 - 提供 AkShare 数据接口
 """
 from flask import Flask, jsonify
 import akshare as ak
