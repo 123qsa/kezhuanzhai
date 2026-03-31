@@ -219,7 +219,7 @@
         async function loadData() {
             const datePicker = document.getElementById('datePicker');
             const date = datePicker.value.replace(/-/g, '');
-            const csvUrl = `cb_data/cb_data_${date}.csv`;
+            const csvUrl = `cb_data_${date}.csv`;
 
             document.getElementById('currentDate').textContent = datePicker.value;
             document.getElementById('loadingState').classList.remove('hidden');
