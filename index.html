@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>可转债每日数据</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .loading { animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: .5; }
+        }
+        .sort-icon { transition: transform 0.2s; }
+        .sort-asc { transform: rotate(180deg); }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+    <!-- Header -->
+    <header class="bg-white shadow-sm border-b">
+        <div class="max-w-[1600px] mx-auto px-4 py-4">
+            <div class="flex items-center justify-between">
+                <div>
+                    <h1 class="text-2xl font-bold text-gray-900">可转债每日数据</h1>
+                    <p class="text-sm text-gray-500 mt-1">A股可转债市场数据监控</p>
+                </div>
+                <div class="flex items-center gap-4">
+                    <div class="text-right">
+                        <p class="text-sm text-gray-500">数据日期</p>
+                        <p id="currentDate" class="text-lg font-semibold text-gray-900">-</p>
+                    </div>
+                    <input
+                        type="date"
+                        id="datePicker"
+                        class="px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    >
+                    <button
+                        onclick="loadData()"
+                        class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                    >
+                        刷新
+                    </button>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="max-w-[1600px] mx-auto px-4 py-6">
+        <!-- Stats Cards -->
+        <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+            <div class="bg-white rounded-lg shadow p-4">
+                <p class="text-sm text-gray-500">可转债总数</p>
+                <p id="totalCount" class="text-2xl font-bold text-blue-600">-</p>
+            </div>
+            <div class="bg-white rounded-lg shadow p-4">
+                <p class="text-sm text-gray-500">平均PB</p>
+                <p id="avgPB" class="text-2xl font-bold text-green-600">-</p>
+            </div>
+            <div class="bg-white rounded-lg shadow p-4">
+                <p class="text-sm text-gray-500">强赎涨幅&gt;20%</p>
+                <p id="strongRedeemCount" class="text-2xl font-bold text-orange-600">-</p>
+            </div>
+            <div class="bg-white rounded-lg shadow p-4">
+                <p class="text-sm text-gray-500">剩余天数&lt;365</p>
+                <p id="expireSoonCount" class="text-2xl font-bold text-red-600">-</p>
+            </div>
+        </div>
+
+        <!-- Filter -->
+        <div class="bg-white rounded-lg shadow mb-4 p-4">
+            <div class="flex flex-wrap gap-4">
+                <div class="flex-1 min-w-[200px]">
+                    <label class="block text-sm font-medium text-gray-700 mb-1">搜索</label>
+                    <input
+                        type="text"
+                        id="searchInput"
+                        placeholder="代码/名称/实际控制人..."
+                        class="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        oninput="filterData()"
+                    >
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">大股东类型</label>
+                    <select id="holderTypeFilter" onchange="filterData()" class="px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        <option value="">全部</option>
+                        <option value="自然人股">自然人股</option>
+                        <option value="法人股">法人股</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">剩余天数</label>
+                    <select id="daysFilter" onchange="filterData()" class="px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        <option value="">全部</option>
+                        <option value="365">小于1年</option>
+                        <option value="730">小于2年</option>
+                        <option value="1095">小于3年</option>
+                    </select>
+                </div>
+            </div>
+        </div>
+
+        <!-- Table -->
+        <div class="bg-white rounded-lg shadow overflow-hidden">
+            <div class="overflow-x-auto max-h-[600px]">
+                <table class="w-full text-sm">
+                    <thead class="bg-gray-100 sticky top-0">
+                        <tr id="tableHeader">
+                            <!-- Headers will be inserted here -->
+                        </tr>
+                    </thead>
+                    <tbody id="tableBody" class="divide-y divide-gray-200">
+                        <!-- Data will be inserted here -->
+                    </tbody>
+                </table>
+            </div>
+            <div id="loadingState" class="hidden py-20 text-center">
+                <div class="inline-block loading w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full"></div>
+                <p class="mt-2 text-gray-500">加载中...</p>
+            </div>
+            <div id="emptyState" class="hidden py-20 text-center">
+                <p class="text-gray-500">暂无数据</p>
+            </div>
+        </div>
+
+        <!-- Pagination -->
+        <div class="mt-4 flex items-center justify-between">
+            <p class="text-sm text-gray-500">
+                显示 <span id="showingCount">0</span> 条，共 <span id="totalFiltered">0</span> 条
+            </p>
+            <div class="flex gap-2">
+                <button onclick="changePage(-1)" class="px-3 py-1 border rounded hover:bg-gray-100">上一页</button>
+                <span id="pageInfo" class="px-3 py-1">第 1 页</span>
+                <button onclick="changePage(1)" class="px-3 py-1 border rounded hover:bg-gray-100">下一页</button>
+            </div>
+        </div>
+    </main>
+
+    <!-- Footer -->
+    <footer class="bg-white border-t mt-12">
+        <div class="max-w-[1600px] mx-auto px-4 py-4">
+            <p class="text-center text-sm text-gray-500">
+                数据来源：AkShare | 更新时间：<span id="updateTime">-</span>
+            </p>
+        </div>
+    </footer>
+
+    <script>
+        // State
+        let allData = [];
+        let filteredData = [];
+        let currentPage = 1;
+        const pageSize = 50;
+        let sortColumn = '';
+        let sortDirection = 'asc';
+
+        // Column definitions
+        const columns = [
+            { key: '正股代码', title: '正股代码', width: '80px' },
+            { key: '正股名称', title: '正股名称', width: '100px' },
+            { key: '大股东类型', title: '大股东类型', width: '90px' },
+            { key: '实际控制人', title: '实际控制人', width: '120px' },
+            { key: '实控人类型', title: '实控人类型', width: '100px' },
+            { key: '当前股价', title: '当前股价', width: '80px', format: 'price' },
+            { key: '每股净资产', title: '每股净资产', width: '90px', format: 'price' },
+            { key: 'PB', title: 'PB', width: '60px', format: 'number' },
+            { key: '期末现金余额', title: '期末现金余额', width: '100px', format: 'number' },
+            { key: '货币资金', title: '货币资金', width: '90px', format: 'number' },
+            { key: '转债代码', title: '转债代码', width: '80px' },
+            { key: '转债名称', title: '转债名称', width: '100px' },
+            { key: '转债剩余规模', title: '转债剩余规模', width: '100px', format: 'number' },
+            { key: '到期赎回价', title: '到期赎回价', width: '90px' },
+            { key: '到期赎回规模', title: '到期赎回规模', width: '100px', format: 'number' },
+            { key: '赎回规模占期末现金比', title: '赎回规模占期末现金比', width: '120px' },
+            { key: '赎回规模占货币资金比', title: '赎回规模占货币资金比', width: '120px' },
+            { key: '转股价格', title: '转股价格', width: '80px', format: 'price' },
+            { key: '强赎价格', title: '强赎价格', width: '80px', format: 'price' },
+            { key: '强赎涨幅', title: '强赎涨幅', width: '80px', format: 'percent' },
+            { key: 'MA5', title: 'MA5', width: '70px', format: 'price' },
+            { key: 'MA10', title: 'MA10', width: '70px', format: 'price' },
+            { key: 'MA20', title: 'MA20', width: '70px', format: 'price' },
+            { key: '到期日期', title: '到期日期', width: '100px' },
+            { key: '剩余天数', title: '剩余天数', width: '80px', format: 'number' }
+        ];
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', function() {
+            // Set default date to today
+            const today = new Date().toISOString().split('T')[0];
+            document.getElementById('datePicker').value = today;
+            document.getElementById('currentDate').textContent = today;
+
+            // Render headers
+            renderHeaders();
+
+            // Load data
+            loadData();
+        });
+
+        function renderHeaders() {
+            const headerRow = document.getElementById('tableHeader');
+            headerRow.innerHTML = columns.map(col => `
+                <th
+                    class="px-2 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider cursor-pointer hover:bg-gray-200 whitespace-nowrap"
+                    style="min-width: ${col.width}"
+                    onclick="sortBy('${col.key}')"
+                >
+                    <div class="flex items-center gap-1">
+                        ${col.title}
+                        <span class="sort-icon ${sortColumn === col.key ? (sortDirection === 'asc' ? 'sort-asc' : '') : 'opacity-0'}">▼</span>
+                    </div>
+                </th>
+            `).join('');
+        }
+
+        async function loadData() {
+            const datePicker = document.getElementById('datePicker');
+            const date = datePicker.value.replace(/-/g, '');
+            const csvUrl = `cb_data/cb_data_${date}.csv`;
+
+            document.getElementById('currentDate').textContent = datePicker.value;
+            document.getElementById('loadingState').classList.remove('hidden');
+            document.getElementById('tableBody').innerHTML = '';
+
+            try {
+                const response = await fetch(csvUrl);
+                if (!response.ok) throw new Error('File not found');
+
+                const csvText = await response.text();
+
+                Papa.parse(csvText, {
+                    header: true,
+                    dynamicTyping: true,
+                    skipEmptyLines: true,
+                    complete: function(results) {
+                        allData = results.data;
+                        filteredData = [...allData];
+                        updateStats();
+                        filterData();
+                        document.getElementById('updateTime').textContent = new Date().toLocaleString('zh-CN');
+                    }
+                });
+            } catch (error) {
+                console.error('Error loading data:', error);
+                document.getElementById('emptyState').classList.remove('hidden');
+                document.getElementById('emptyState').innerHTML = `
+                    <p class="text-gray-500">未找到 ${datePicker.value} 的数据</p>
+                    <p class="text-sm text-gray-400 mt-2">请检查日期或联系管理员</p>
+                `;
+            } finally {
+                document.getElementById('loadingState').classList.add('hidden');
+            }
+        }
+
+        function updateStats() {
+            document.getElementById('totalCount').textContent = allData.length;
+
+            const pbValues = allData.filter(d => d.PB && !isNaN(d.PB)).map(d => d.PB);
+            const avgPB = pbValues.length > 0 ? (pbValues.reduce((a, b) => a + b, 0) / pbValues.length).toFixed(2) : '-';
+            document.getElementById('avgPB').textContent = avgPB;
+
+            const strongRedeem = allData.filter(d => {
+                const pct = parseFloat(d.强赎涨幅);
+                return !isNaN(pct) && pct > 20;
+            }).length;
+            document.getElementById('strongRedeemCount').textContent = strongRedeem;
+
+            const expireSoon = allData.filter(d => {
+                const days = parseInt(d.剩余天数);
+                return !isNaN(days) && days < 365;
+            }).length;
+            document.getElementById('expireSoonCount').textContent = expireSoon;
+        }
+
+        function filterData() {
+            const searchTerm = document.getElementById('searchInput').value.toLowerCase();
+            const holderType = document.getElementById('holderTypeFilter').value;
+            const daysLimit = document.getElementById('daysFilter').value;
+
+            filteredData = allData.filter(row => {
+                // Search filter
+                if (searchTerm) {
+                    const searchable = [
+                        row.正股代码, row.正股名称, row.转债代码, row.转债名称, row.实际控制人
+                    ].join(' ').toLowerCase();
+                    if (!searchable.includes(searchTerm)) return false;
+                }
+
+                // Holder type filter
+                if (holderType && row.大股东类型 !== holderType) return false;
+
+                // Days filter
+                if (daysLimit) {
+                    const days = parseInt(row.剩余天数);
+                    if (isNaN(days) || days > parseInt(daysLimit)) return false;
+                }
+
+                return true;
+            });
+
+            currentPage = 1;
+            renderTable();
+            updatePagination();
+        }
+
+        function sortBy(column) {
+            if (sortColumn === column) {
+                sortDirection = sortDirection === 'asc' ? 'desc' : 'asc';
+            } else {
+                sortColumn = column;
+                sortDirection = 'asc';
+            }
+
+            filteredData.sort((a, b) => {
+                let valA = a[column];
+                let valB = b[column];
+
+                // Parse numbers
+                if (typeof valA === 'string' && valA.includes('%')) {
+                    valA = parseFloat(valA);
+                    valB = parseFloat(valB);
+                }
+
+                if (!isNaN(valA) && !isNaN(valB)) {
+                    return sortDirection === 'asc' ? valA - valB : valB - valA;
+                }
+
+                // String comparison
+                valA = String(valA || '').toLowerCase();
+                valB = String(valB || '').toLowerCase();
+
+                if (valA < valB) return sortDirection === 'asc' ? -1 : 1;
+                if (valA > valB) return sortDirection === 'asc' ? 1 : -1;
+                return 0;
+            });
+
+            renderHeaders();
+            renderTable();
+        }
+
+        function renderTable() {
+            const tbody = document.getElementById('tableBody');
+            const start = (currentPage - 1) * pageSize;
+            const end = start + pageSize;
+            const pageData = filteredData.slice(start, end);
+
+            tbody.innerHTML = pageData.map(row => `
+                <tr class="hover:bg-gray-50">
+                    ${columns.map(col => {
+                        let value = row[col.key];
+                        let className = 'px-2 py-2 whitespace-nowrap';
+
+                        // Format numbers
+                        if (col.format === 'price' && typeof value === 'number') {
+                            value = value.toFixed(2);
+                        } else if (col.format === 'number' && typeof value === 'number') {
+                            value = value.toLocaleString('zh-CN');
+                        }
+
+                        // Color coding
+                        if (col.key === 'PB' && typeof value === 'number') {
+                            className += value < 1 ? ' text-green-600 font-medium' : value > 3 ? ' text-red-600' : '';
+                        }
+                        if (col.key === '强赎涨幅' && value && value.includes('%')) {
+                            const pct = parseFloat(value);
+                            className += pct > 30 ? ' text-red-600 font-bold' : pct > 20 ? ' text-orange-600' : pct > 10 ? ' text-yellow-600' : ' text-green-600';
+                        }
+                        if (col.key === '剩余天数' && typeof value === 'number') {
+                            className += value < 365 ? ' text-red-600 font-medium' : value < 730 ? ' text-orange-600' : '';
+                        }
+
+                        return `<td class="${className}">${value || '-'}</td>`;
+                    }).join('')}
+                </tr>
+            `).join('');
+
+            document.getElementById('showingCount').textContent = pageData.length;
+            document.getElementById('totalFiltered').textContent = filteredData.length;
+
+            if (pageData.length === 0) {
+                document.getElementById('emptyState').classList.remove('hidden');
+            } else {
+                document.getElementById('emptyState').classList.add('hidden');
+            }
+        }
+
+        function updatePagination() {
+            const totalPages = Math.ceil(filteredData.length / pageSize);
+            document.getElementById('pageInfo').textContent = `第 ${currentPage} / ${totalPages} 页`;
+        }
+
+        function changePage(delta) {
+            const totalPages = Math.ceil(filteredData.length / pageSize);
+            const newPage = currentPage + delta;
+
+            if (newPage >= 1 && newPage <= totalPages) {
+                currentPage = newPage;
+                renderTable();
+                updatePagination();
+            }
+        }
+    </script>
+</body>
+</html>
