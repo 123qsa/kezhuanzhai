@@ -67,13 +67,13 @@ def push_to_remote(local_file: str, remote_config: dict) -> bool:
     filename = os.path.basename(local_file)
     remote_path = f"{remote_config['remote_path']}/{filename}"
 
-    with FilePusher(
+    pusher = FilePusher(
         host=remote_config['host'],
         username=remote_config['username'],
         password=remote_config['password'],
         port=remote_config.get('port', 22)
-    ) as pusher:
-        return pusher.push_file(local_file, remote_path)
+    )
+    return pusher.push_file(local_file, remote_path)
 
 
 def main():
