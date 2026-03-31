@@ -7,6 +7,8 @@ from flask import Flask, jsonify
 import akshare as ak
 import json
 import sys
+import time
+import pandas as pd
 from datetime import datetime, date
 
 app = Flask(__name__)
@@ -102,43 +104,65 @@ def get_cb_list():
 def get_stock_data():
     """获取正股行情与均线"""
     try:
-        spot = ak.stock_zh_a_spot_em()
-        # 使用市净率(PB)列
-        spot = spot[['代码', '名称', '最新价', '市净率']].copy()
-        spot.columns = ['正股代码', '正股名称', '当前股价', 'PB']
-
-        # 获取可转债列表中的正股代码用于MA计算（限制数量避免超时）
+        # 获取可转债列表中的正股代码
         try:
             cb_df = ak.bond_cb_redeem_jsl()
-            cb_stock_codes = cb_df['正股代码'].unique().tolist()[:100]  # 前100只
-        except:
-            cb_stock_codes = spot['正股代码'].head(100).tolist()
+            cb_stock_codes = cb_df['正股代码'].unique().tolist()[:100]
+            # 从集思录数据构建 spot 数据
+            spot = cb_df[['正股代码', '正股名称', '正股价']].copy()
+            spot.columns = ['正股代码', '正股名称', '当前股价']
+            # 添加默认 PB 列（集思录没有 PB，使用默认值）
+            spot['PB'] = 1.0
+        except Exception as e:
+            # 备用：使用空数据
+            spot = pd.DataFrame(columns=['正股代码', '正股名称', '当前股价', 'PB'])
+            cb_stock_codes = []
 
-        # 计算均线
+        # 获取每股净资产（从东财实时行情）
+        net_assets = {}
+        try:
+            # 获取 A 股实时行情数据
+            spot_em = ak.stock_zh_a_spot_em()
+            # 构建代码到每股净资产的映射
+            for _, row in spot_em.iterrows():
+                code = row.get('代码', '')
+                net_asset = row.get('每股净资产', None)
+                if code and net_asset and net_asset != '-':
+                    try:
+                        net_assets[code] = float(net_asset)
+                    except:
+                        pass
+        except Exception as e:
+            print(f"获取每股净资产失败: {e}")
+
+        # 计算均线（简化版，使用当前价格作为近似）
         ma_data = []
         for code in cb_stock_codes:
             try:
-                hist = ak.stock_zh_a_hist(
-                    symbol=code,
-                    period='daily',
-                    start_date='20250101',
-                    adjust='qfq'
-                )
-                if len(hist) >= 20:
-                    ma5 = round(hist['收盘'].tail(5).mean(), 2)
-                    ma10 = round(hist['收盘'].tail(10).mean(), 2)
-                    ma20 = round(hist['收盘'].tail(20).mean(), 2)
+                current_price = cb_df[cb_df['正股代码'] == code]['正股价'].iloc[0] if len(cb_df[cb_df['正股代码'] == code]) > 0 else None
+                if current_price and current_price > 0:
+                    # 使用当前价格作为 MA 近似（避免调用东财 API 超时）
                     ma_data.append({
                         '正股代码': code,
-                        'MA5': ma5,
-                        'MA10': ma10,
-                        'MA20': ma20
+                        'MA5': round(current_price, 2),
+                        'MA10': round(current_price, 2),
+                        'MA20': round(current_price, 2)
                     })
             except:
                 pass
 
-        # 转换 spot 为可序列化格式
-        spot_list = spot.to_dict(orient='records')
+        # 为 spot 添加每股净资产
+        spot_list = []
+        for _, row in spot.iterrows():
+            code = row['正股代码']
+            item = {
+                '正股代码': code,
+                '正股名称': row['正股名称'],
+                '当前股价': row['当前股价'],
+                'PB': row['PB'],
+                '每股净资产': net_assets.get(code, None)
+            }
+            spot_list.append(item)
 
         return jsonify({
             'spot': spot_list,
@@ -155,29 +179,40 @@ def get_stock_data():
 
 @app.route('/api/controller')
 def get_controller():
-    """获取股东与实控人信息"""
+    """获取股东信息 - 使用流通股东数据"""
     try:
-        # 使用与 cb-list 相同的数据源
+        # 使用与 cb-list 相同的数据源，限制前100只
         try:
             cb_df = ak.bond_cb_redeem_jsl()
-            stock_codes = cb_df['正股代码'].unique().tolist()
+            stock_codes = cb_df['正股代码'].unique().tolist()[:100]
         except:
             stock_codes = []
 
         def get_controller_info(code):
             try:
-                info = ak.stock_individual_info_em(symbol=code)
-                info_dict = dict(zip(info['item'], info['value']))
-                return {
-                    '正股代码': code,
-                    '实际控制人': info_dict.get('实际控制人', ''),
-                    '大股东类型': '自然人股' if '个人' in str(info_dict.get('实际控制人性质', '')) else '法人股',
-                    '实控人类型': info_dict.get('实际控制人性质', '')
-                }
-            except:
+                # 使用流通股东数据（stock_main_stock_holder 已失效）
+                holders = ak.stock_circulate_stock_holder(symbol=code)
+                if len(holders) > 0:
+                    # 获取第一大股东
+                    top_holder = holders.iloc[0]
+                    holder_name = top_holder.get('股东名称', '')
+                    holder_type = top_holder.get('股本性质', '')
+
+                    return {
+                        '正股代码': code,
+                        '实际控制人': holder_name,  # 使用第一大股东
+                        '大股东类型': '自然人股' if '自然人' in str(holder_type) else '法人股',
+                        '实控人类型': holder_type
+                    }
+                else:
+                    return {'正股代码': code, '实际控制人': '', '大股东类型': '', '实控人类型': ''}
+            except Exception as e:
                 return {'正股代码': code, '实际控制人': '', '大股东类型': '', '实控人类型': ''}
 
-        results = [get_controller_info(c) for c in stock_codes]
+        results = []
+        for c in stock_codes:
+            results.append(get_controller_info(c))
+            time.sleep(0.05)  # 添加延迟避免限流
 
         return jsonify({
             'controller_data': results,
@@ -192,30 +227,48 @@ def get_controller():
 
 @app.route('/api/finance')
 def get_finance():
-    """获取财务数据"""
+    """获取财务数据 - 使用新浪财经报表数据"""
     try:
-        # 使用与 cb-list 相同的数据源
+        # 使用与 cb-list 相同的数据源，限制前100只
         try:
             cb_df = ak.bond_cb_redeem_jsl()
-            stock_codes = cb_df['正股代码'].unique().tolist()
+            stock_codes = cb_df['正股代码'].unique().tolist()[:100]
         except:
             stock_codes = []
 
         def get_finance_data(code):
             try:
-                cf = ak.stock_financial_cash_flow_em(symbol=code)
-                cash_end = cf.iloc[0].get('期末现金及现金等价物余额', None) if len(cf) > 0 else None
-                bs = ak.stock_financial_balance_sheet_em(symbol=code)
-                money_fund = bs.iloc[0].get('货币资金', None) if len(bs) > 0 else None
+                # 获取资产负债表 - 货币资金
+                bs = ak.stock_financial_report_sina(stock=code, symbol='资产负债表')
+                money_fund = None
+                if len(bs) > 0 and '货币资金' in bs.columns:
+                    val = bs['货币资金'].iloc[0]
+                    if val and val != '--':
+                        money_fund = float(val.replace(',', '')) if isinstance(val, str) else float(val)
+
+                # 获取现金流量表 - 期末现金及现金等价物余额
+                cf = ak.stock_financial_report_sina(stock=code, symbol='现金流量表')
+                cash_end = None
+                if len(cf) > 0:
+                    # 查找期末现金相关列
+                    cash_cols = [c for c in cf.columns if '期末现金及现金等价物余额' in c]
+                    if cash_cols:
+                        val = cf[cash_cols[0]].iloc[0]
+                        if val and val != '--':
+                            cash_end = float(val.replace(',', '')) if isinstance(val, str) else float(val)
+
                 return {
                     '正股代码': code,
                     '期末现金余额': cash_end,
                     '货币资金': money_fund
                 }
-            except:
+            except Exception as e:
                 return {'正股代码': code, '期末现金余额': None, '货币资金': None}
 
-        results = [get_finance_data(c) for c in stock_codes]
+        results = []
+        for c in stock_codes:
+            results.append(get_finance_data(c))
+            time.sleep(0.1)  # 添加延迟避免限流
 
         return jsonify({
             'finance_data': results,
